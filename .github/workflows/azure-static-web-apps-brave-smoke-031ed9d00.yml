@@ -19,15 +19,17 @@ jobs:
         with:
           node-version: 20
 
+      # Build the Vite app (this is where VITE_* are baked in)
       - name: Build
         run: |
           npm ci
           npm run build
-        # Optional: forces envs even if .env.production is missed
+        # keep these even though you have .env.production; this guarantees correctness
         env:
           VITE_API_BASE_URL: https://adoppet-f6edcyfchphjh3hv.malaysiawest-01.azurewebsites.net/api
-          VITE_SOCKET_URL: https://adoppet-f6edcyfchphjh3hv.malaysiawest-01.azurewebsites.net
+          VITE_SOCKET_URL:   https://adoppet-f6edcyfchphjh3hv.malaysiawest-01.azurewebsites.net
 
+      # Quick sanity check so we know the bundle has the right URL
       - name: Verify baked API base
         run: |
           grep -R "adoppet-f6edcyfchphjh3hv.malaysiawest-01.azurewebsites.net/api" dist && echo "✅ Found"
@@ -36,6 +38,7 @@ jobs:
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
-          app_location: "/"         # <-- your Vite app is at repo root
-          api_location: ""          # <-- no Functions here
-          output_location: "dist"   # <-- Vite output
+          action: "upload"         # <-- REQUIRED (fixes your error)
+          app_location: "/"        # repo root contains the Vite app
+          api_location: ""         # no Functions in this repo
+          output_location: "dist"  # Vite build output
