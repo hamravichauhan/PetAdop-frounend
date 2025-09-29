@@ -12,12 +12,11 @@ export default function NewPet() {
 
   const [data, setData] = React.useState({
     name: "",
-    species: "dog",
-    otherSpecies: "",
+    species: "dog",   // must be one of: dog | cat | rabbit | other
     breed: "",
-    gender: "unknown",          // align with model enum/default
+    gender: "male",   // must be one of: male | female
     ageMonths: "",
-    size: "medium",             // avoid enum "" problem
+    size: "medium",   // small | medium | large (defaulted to avoid empty)
     city: "",
     vaccinated: false,
     dewormed: false,
@@ -25,14 +24,14 @@ export default function NewPet() {
     description: "",
   });
 
-  const [files, setFiles] = React.useState([]);      // File[]
+  const [files, setFiles] = React.useState([]);       // File[]
   const [previews, setPreviews] = React.useState([]); // object URLs
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState("");
 
   const update = (k, v) => setData((s) => ({ ...s, [k]: v }));
 
-  // build previews + cleanup
+  // previews + cleanup
   React.useEffect(() => {
     previews.forEach((url) => URL.revokeObjectURL(url));
     const urls = files.map((f) => URL.createObjectURL(f));
@@ -58,42 +57,59 @@ export default function NewPet() {
     setSubmitting(true);
 
     try {
-      // Build multipart/form-data for file upload + fields
-      const fd = new FormData();
+      // quick client-side validation to avoid 400s
+      if (!data.name?.trim()) throw new Error("Name is required");
+      if (!data.species) throw new Error("Species is required");
+      if (!["dog", "cat", "rabbit", "other"].includes(data.species))
+        throw new Error("Invalid species");
+      if (!data.gender) throw new Error("Gender is required");
+      if (!["male", "female"].includes(data.gender))
+        throw new Error("Invalid gender");
+      if (!data.size) throw new Error("Size is required");
+      if (!["small", "medium", "large"].includes(data.size))
+        throw new Error("Invalid size");
+      if (!data.city?.trim()) throw new Error("City is required");
 
-      fd.append("name", data.name);
-      fd.append("species", data.species);
+      // Build a clean payload (do not send status; backend default applies)
+      const clean = {
+        name: data.name.trim(),
+        species: data.species,
+        breed: data.breed || "",
+        gender: data.gender,
+        ...(data.ageMonths === "" ? {} : { ageMonths: Math.max(0, Number(data.ageMonths)) }),
+        size: data.size,
+        city: data.city.trim(),
+        vaccinated: !!data.vaccinated,
+        dewormed: !!data.dewormed,
+        sterilized: !!data.sterilized,
+        description: data.description?.trim() || "",
+      };
 
-      if (data.species === "other") {
-        // required by model when species="other"
-        fd.append("otherSpecies", data.otherSpecies.trim());
+      let payload;
+
+      if (files.length > 0) {
+        // multipart for photos
+        payload = new FormData();
+        Object.entries(clean).forEach(([k, v]) => {
+          if (v === "" || v == null) return; // skip empties
+          payload.append(k, typeof v === "boolean" ? String(v) : v);
+        });
+        files.forEach((file) => payload.append("photos", file)); // field name must be "photos"
+      } else {
+        // JSON when no files
+        payload = clean;
       }
 
-      if (data.breed) fd.append("breed", data.breed);
-      fd.append("gender", data.gender); // includes "unknown"
-      if (data.ageMonths !== "") {
-        const age = Math.max(0, Number(data.ageMonths));
-        fd.append("ageMonths", String(age));
-      }
-      if (data.size) fd.append("size", data.size);
-      if (data.city) fd.append("city", data.city);
-      if (data.description) fd.append("description", data.description);
-
-      // Booleans as strings; server can coerce ("true"/"false")
-      fd.append("vaccinated", String(data.vaccinated));
-      fd.append("dewormed", String(data.dewormed));
-      fd.append("sterilized", String(data.sterilized));
-
-      // Status default is "available" on the model, so we don't need to send it.
-
-      // Files
-      files.forEach((file) => fd.append("photos", file)); // field name "photos"
-
-      const ok = await create(fd); // your store should POST fd without manually setting Content-Type
-      if (ok) nav("/pets");
+      const created = await create(payload); // store should not force Content-Type for FormData
+      if (created) nav("/pets");
     } catch (err) {
-      console.error(err);
-      setError("Failed to publish this pet. Please try again.");
+      console.error("create pet failed", err);
+      setError(
+        err?.response?.data?.errors?.[0]?.message ||
+          err?.response?.data?.message ||
+          err?.message ||
+          "Failed to publish this pet. Please try again."
+      );
     } finally {
       setSubmitting(false);
     }
@@ -126,19 +142,8 @@ export default function NewPet() {
             <option value="dog">Dog</option>
             <option value="cat">Cat</option>
             <option value="rabbit">Rabbit</option>
-            <option value="bird">Bird</option>
             <option value="other">Other</option>
           </select>
-
-          {/* Only show when "Other" */}
-          {data.species === "other" && (
-            <Input
-              placeholder="What species?"
-              value={data.otherSpecies}
-              onChange={(e) => update("otherSpecies", e.target.value)}
-              required
-            />
-          )}
 
           <Input
             placeholder="Breed"
@@ -151,7 +156,6 @@ export default function NewPet() {
             value={data.gender}
             onChange={(e) => update("gender", e.target.value)}
           >
-            <option value="unknown">Unknown</option>
             <option value="male">Male</option>
             <option value="female">Female</option>
           </select>
