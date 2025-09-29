@@ -1,3 +1,4 @@
+// src/pages/NewPet.jsx
 import React from "react";
 import Input from "../components/ui/Input.jsx";
 import Textarea from "../components/ui/Textarea.jsx";
@@ -12,10 +13,11 @@ export default function NewPet() {
   const [data, setData] = React.useState({
     name: "",
     species: "dog",
+    otherSpecies: "",
     breed: "",
-    gender: "male",
+    gender: "unknown",          // align with model enum/default
     ageMonths: "",
-    size: "",
+    size: "medium",             // avoid enum "" problem
     city: "",
     vaccinated: false,
     dewormed: false,
@@ -23,8 +25,8 @@ export default function NewPet() {
     description: "",
   });
 
-  const [files, setFiles] = React.useState([]); // File[]
-  const [previews, setPreviews] = React.useState([]); // object URLs for preview
+  const [files, setFiles] = React.useState([]);      // File[]
+  const [previews, setPreviews] = React.useState([]); // object URLs
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState("");
 
@@ -32,11 +34,9 @@ export default function NewPet() {
 
   // build previews + cleanup
   React.useEffect(() => {
-    // revoke old
     previews.forEach((url) => URL.revokeObjectURL(url));
     const urls = files.map((f) => URL.createObjectURL(f));
     setPreviews(urls);
-    // cleanup on unmount/change
     return () => urls.forEach((u) => URL.revokeObjectURL(u));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files]);
@@ -44,7 +44,7 @@ export default function NewPet() {
   const handleFiles = (fileList) => {
     const picked = Array.from(fileList || []);
     const MAX = 5;
-    const next = [...files, ...picked].slice(0, MAX); // cap at 5
+    const next = [...files, ...picked].slice(0, MAX);
     setFiles(next);
   };
 
@@ -56,16 +56,40 @@ export default function NewPet() {
     e.preventDefault();
     setError("");
     setSubmitting(true);
-    try {
-      // Cast ageMonths to number if provided (empty string stays empty -> backend can interpret)
-      const payload = {
-        ...data,
-        ageMonths:
-          data.ageMonths === "" ? "" : Math.max(0, Number(data.ageMonths)),
-        photos: files, // backend expects field name "photos"
-      };
 
-      const ok = await create(payload);
+    try {
+      // Build multipart/form-data for file upload + fields
+      const fd = new FormData();
+
+      fd.append("name", data.name);
+      fd.append("species", data.species);
+
+      if (data.species === "other") {
+        // required by model when species="other"
+        fd.append("otherSpecies", data.otherSpecies.trim());
+      }
+
+      if (data.breed) fd.append("breed", data.breed);
+      fd.append("gender", data.gender); // includes "unknown"
+      if (data.ageMonths !== "") {
+        const age = Math.max(0, Number(data.ageMonths));
+        fd.append("ageMonths", String(age));
+      }
+      if (data.size) fd.append("size", data.size);
+      if (data.city) fd.append("city", data.city);
+      if (data.description) fd.append("description", data.description);
+
+      // Booleans as strings; server can coerce ("true"/"false")
+      fd.append("vaccinated", String(data.vaccinated));
+      fd.append("dewormed", String(data.dewormed));
+      fd.append("sterilized", String(data.sterilized));
+
+      // Status default is "available" on the model, so we don't need to send it.
+
+      // Files
+      files.forEach((file) => fd.append("photos", file)); // field name "photos"
+
+      const ok = await create(fd); // your store should POST fd without manually setting Content-Type
       if (ok) nav("/pets");
     } catch (err) {
       console.error(err);
@@ -102,8 +126,19 @@ export default function NewPet() {
             <option value="dog">Dog</option>
             <option value="cat">Cat</option>
             <option value="rabbit">Rabbit</option>
+            <option value="bird">Bird</option>
             <option value="other">Other</option>
           </select>
+
+          {/* Only show when "Other" */}
+          {data.species === "other" && (
+            <Input
+              placeholder="What species?"
+              value={data.otherSpecies}
+              onChange={(e) => update("otherSpecies", e.target.value)}
+              required
+            />
+          )}
 
           <Input
             placeholder="Breed"
@@ -116,6 +151,7 @@ export default function NewPet() {
             value={data.gender}
             onChange={(e) => update("gender", e.target.value)}
           >
+            <option value="unknown">Unknown</option>
             <option value="male">Male</option>
             <option value="female">Female</option>
           </select>
@@ -133,7 +169,6 @@ export default function NewPet() {
             value={data.size}
             onChange={(e) => update("size", e.target.value)}
           >
-            <option value="">Size</option>
             <option value="small">Small</option>
             <option value="medium">Medium</option>
             <option value="large">Large</option>
@@ -183,8 +218,6 @@ export default function NewPet() {
         {/* Photos */}
         <div>
           <label className="mb-2 block text-sm">Photos (up to 5)</label>
-
-          {/* File picker */}
           <input
             name="photos"
             type="file"
@@ -193,7 +226,6 @@ export default function NewPet() {
             onChange={(e) => handleFiles(e.target.files)}
           />
 
-          {/* Previews */}
           {previews.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-3">
               {previews.map((src, i) => (
