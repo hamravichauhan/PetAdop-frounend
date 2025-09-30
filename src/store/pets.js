@@ -5,7 +5,6 @@ import api from "../utils/api.js";
 /* -------------------- helpers -------------------- */
 function normalizeList(resp) {
   const d = resp?.data;
-  // Your controllers return { success, meta, data: [...] }
   if (Array.isArray(d)) return d;
   if (Array.isArray(d?.data)) return d.data;
   return [];
@@ -31,6 +30,41 @@ function readTotal(resp, fallbackLen = 0) {
     d?.pagination?.total ??
     (Array.isArray(d) ? d.length : Array.isArray(d?.data) ? d.data.length : fallbackLen)
   );
+}
+
+/* ---- payload builders for JSON path ---- */
+function toJSONBody(input = {}) {
+  const b = { ...input };
+
+  // sanitize strings
+  if (typeof b.name === "string") b.name = b.name.trim();
+  if (typeof b.city === "string") b.city = b.city.trim();
+  if (typeof b.description === "string") b.description = b.description.trim();
+
+  // booleans
+  b.vaccinated = !!b.vaccinated;
+  b.dewormed   = !!b.dewormed;
+  b.sterilized = !!b.sterilized;
+
+  // ageMonths: omit if empty; else number >= 0
+  if (b.ageMonths === "" || b.ageMonths == null) {
+    delete b.ageMonths;
+  } else {
+    b.ageMonths = Math.max(0, Number(b.ageMonths));
+  }
+
+  // never send files in JSON
+  delete b.photos;
+
+  // do NOT send status; let schema default
+  delete b.status;
+
+  // drop empty optional strings (breed/description etc.) if ""
+  Object.entries(b).forEach(([k, v]) => {
+    if (v === "") delete b[k];
+  });
+
+  return b;
 }
 
 /* -------------------- store -------------------- */
@@ -81,7 +115,7 @@ export const usePetsStore = create((set, get) => ({
     }
   },
 
-  /** Success stories (adopted) + count (use meta.total from a single call when available) */
+  /** Success stories (adopted) + count */
   async fetchAdopted() {
     try {
       const resp = await api.get("/pets", {
@@ -110,7 +144,6 @@ export const usePetsStore = create((set, get) => ({
       });
     } catch (e) {
       console.warn("fetchCounts failed", e);
-      // keep previous values; UI remains stable
     }
   },
 
@@ -125,32 +158,37 @@ export const usePetsStore = create((set, get) => ({
     }
   },
 
-  /** Create new pet listing (multipart for photos). Returns the created doc or null. */
-  async create(payload) {
+  /**
+   * Create new pet listing.
+   * - If called with FormData, post it directly.
+   * - Otherwise, build clean JSON and post.
+   * Returns created doc or null.
+   */
+  async create(input) {
     try {
-      const form = new FormData();
-      Object.entries(payload).forEach(([k, v]) => {
-        if (k === "photos" && Array.isArray(v)) {
-          v.forEach((f) => form.append("photos", f));
-        } else if (v != null) {
-          form.append(k, v);
-        }
-      });
+      let resp;
 
-      const resp = await api.post("/pets", form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      if (typeof FormData !== "undefined" && input instanceof FormData) {
+        // FormData path (photos selected in UI)
+        // Do NOT set Content-Type; browser sets multipart boundary.
+        resp = await api.post("/pets", input);
+      } else {
+        // JSON path (no photos)
+        const body = toJSONBody(input);
+        resp = await api.post("/pets", body);
+      }
+
       const created = resp?.data?.data || null;
-
-      // optional: prepend to myListings if you want immediate feedback
       if (created) {
         const mine = get().myListings || [];
         set({ myListings: [created, ...mine] });
       }
-
       return created;
     } catch (e) {
-      console.error("create pet failed", e);
+      console.error("create pet failed", {
+        status: e?.response?.status,
+        data: e?.response?.data,
+      });
       return null;
     }
   },
