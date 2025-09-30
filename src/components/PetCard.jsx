@@ -4,35 +4,50 @@ import { useNavigate } from "react-router-dom";
 import { MapPin } from "lucide-react";
 import { useAuthStore } from "../store/auth.js";
 
+/** Get backend origin from VITE_API_BASE_URL by stripping a trailing '/api' */
+function deriveApiOrigin() {
+  const base = (import.meta.env?.VITE_API_BASE_URL || "").trim();
+  if (!base) return ""; // dev: let it be relative for Vite proxy
+  try {
+    // remove trailing '/api' if present
+    const origin = base.replace(/\/api\/?$/i, "");
+    return origin;
+  } catch {
+    return "";
+  }
+}
+
 /** Turn a photo value into a browser-loadable URL. */
 function resolvePhoto(raw, apiOrigin) {
   if (!raw) return null;
   const s = String(raw).trim();
   if (!s) return null;
+
+  // Already absolute or data URL
   if (/^https?:\/\//i.test(s) || s.startsWith("data:")) return s;
 
   // Normalize to "/uploads/..."
-  const path = s.startsWith("/uploads/")
-    ? s
-    : s.startsWith("uploads/")
-    ? `/${s}`
-    : s;
+  let path = s;
+  if (path.startsWith("uploads/")) path = `/${path}`;
+  if (!path.startsWith("/uploads/")) path = `/uploads/${path.replace(/^\/+/, "")}`;
 
+  // If we have an apiOrigin (prod), return absolute; otherwise relative (dev proxy)
   const base = (apiOrigin || "").replace(/\/+$/, "");
-  if (path.startsWith("/uploads/")) return `${base}${path}`;
-  return `${base}/uploads/${path.replace(/^\/+/, "")}`;
+  return base ? `${base}${path}` : path;
 }
 
 export default function PetCard({ pet }) {
   const navigate = useNavigate();
   const me = useAuthStore((s) => s.user);
 
-  const API_ORIGIN = import.meta.env?.VITE_API_ORIGIN || "";
+  // Prefer derived origin (from VITE_API_BASE_URL); fallback to explicit VITE_API_ORIGIN if you set it.
+  const API_ORIGIN =
+    deriveApiOrigin() ||
+    (import.meta.env?.VITE_API_ORIGIN || "").replace(/\/+$/, "");
 
   const id = pet?._id || pet?.id;
   const myId = me?._id || me?.id || null;
 
-  // Owner detection handles several shapes
   const ownerId =
     pet?.ownerId ??
     pet?.owner?._id ??
@@ -43,7 +58,6 @@ export default function PetCard({ pet }) {
 
   const isMine = !!myId && !!ownerId && String(ownerId) === String(myId);
 
-  // NEWEST photo (last), fallback to picsum
   const photo = React.useMemo(() => {
     const arr = Array.isArray(pet?.photos) ? pet.photos : [];
     const raw = arr.length > 0 ? arr[arr.length - 1] : null;
@@ -63,7 +77,6 @@ export default function PetCard({ pet }) {
 
   return (
     <div className="overflow-hidden rounded-2xl bg-gradient-to-b from-gray-800 to-gray-900 shadow-md">
-      {/* image (not clickable) */}
       <div className="relative aspect-[4/3] w-full overflow-hidden">
         <img
           src={photo}
@@ -81,7 +94,6 @@ export default function PetCard({ pet }) {
         />
       </div>
 
-      {/* content */}
       <div className="p-4">
         <h3 className="text-lg font-bold text-white">
           {pet?.name || "Lovely friend"}
@@ -90,7 +102,6 @@ export default function PetCard({ pet }) {
           <MapPin className="h-4 w-4" /> {pet?.city || "Unknown"}
         </p>
 
-        {/* Only this button navigates */}
         <button
           type="button"
           onClick={onOpen}
